@@ -90,13 +90,6 @@ class LECODirector:
         self.settings.child('settings_client').clearChildren()
         self.listener.stop_listen()
 
-    def stop(self):
-        """
-            not implemented.
-        """
-        pass
-        return ""
-
     def emit_status(self, status: ThreadCommand) -> None:
         """ Emit the status_sig signal with the given status ThreadCommand back to the main GUI.
         """
@@ -110,7 +103,10 @@ class LECODirector:
         """ Write the value of a param upfated from the actor to here in the
         Parameter with path: ('move_settings', 'settings_client')
         """
-        param: ParameterWithPath = SerializableFactory().get_apply_deserializer(additional_payload[0])
+        assert additional_payload
+        param = cast(
+            ParameterWithPath, SerializableFactory().get_apply_deserializer(additional_payload[0])
+        )
 
         try:
             path = ['settings_client']
