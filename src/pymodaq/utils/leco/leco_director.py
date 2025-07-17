@@ -1,7 +1,9 @@
 
 import random
 from pymodaq_utils.enums import StrEnum
-from typing import Callable, Sequence, List, Optional, Union
+from typing import Any, cast, Callable, Sequence, List, Optional, Union
+
+from pyleco.core.data_message import DataMessage
 
 import pymodaq_gui.parameter.utils as putils
 # object used to send info back to the main thread:
@@ -12,6 +14,7 @@ from pymodaq_gui.parameter import ioxml
 from pymodaq_gui.parameter.utils import ParameterWithPath
 
 from pymodaq.utils.leco.director_utils import GenericDirector
+from pymodaq.utils.leco.utils import leco_tuple_to_thread_command
 from pymodaq.utils.leco.pymodaq_listener import PymodaqListener
 from pymodaq_utils.serialize.factory import SerializableFactory
 from pymodaq.control_modules.thread_commands import ThreadStatusMove
@@ -67,6 +70,7 @@ class LECODirector:
         self.register_binary_rpc_methods((
             self.set_info,
         ))
+        self.listener.signals.data_message_received.connect(self.handle_data_message)
 
     def register_binary_rpc_methods(self, methods: Sequence[Callable]) -> None:
         for method in methods:
@@ -94,6 +98,57 @@ class LECODirector:
         """ Emit the status_sig signal with the given status ThreadCommand back to the main GUI.
         """
         super().emit_status(status=status)  # type: ignore
+
+    def emit_status_binary(self, additional_payload: Optional[List[bytes]] = None) -> None:
+        # TODO used for normal RPC call
+        assert additional_payload
+        thread_command = cast(
+            ThreadCommand, SerializableFactory().get_apply_deserializer(additional_payload[0])
+        )
+        self.emit_status(thread_command)
+
+    def emit_signal_binary(
+        self, name: str, content: Optional[Any], additional_payload: Optional[List[bytes]] = None
+    ) -> None:
+        # TODO used for normal RPC call
+        if content is None and additional_payload:
+            content = SerializableFactory().get_apply_deserializer(additional_payload[0])
+        self.emit_signal(name=name, content=content)
+
+    def emit_signal(self, name: str, content: Optional[Any] = None):
+        """Emit a signal."""
+        if content:
+            getattr(self, name).emit(content)
+        else:
+            getattr(self, name).emit()
+
+    def handle_data_message(self, message: DataMessage) -> None:
+        try:
+            data: dict[str, Any] = message.data  # type: ignore
+            typ = data.pop("type")
+        except TypeError as exc:
+            # TODO proper logging
+            print("Error decoding the message", exc)
+            return
+        if typ == "ThreadCommand":
+            try:
+                thread_command = leco_tuple_to_thread_command(
+                    command_dict=message.data,  # type: ignore
+                    additional=message.payload[1:],
+                )
+            except:
+                pass
+            else:
+                self.emit_status(status=thread_command)
+        elif typ == "Signal":
+            if data.get("content", -1) is None:
+                try:
+                    data["content"] = SerializableFactory().get_apply_deserializer(
+                        message.payload[1]
+                    )
+                except IndexError:
+                    pass
+            self.emit_signal(**data)
 
     # Methods accessible via remote calls
     def set_info(self,

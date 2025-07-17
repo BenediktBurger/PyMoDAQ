@@ -893,6 +893,10 @@ class DAQ_Viewer(ParameterControlModule):
                 self._grab_done = True
                 self.grab_done_signal.emit(self._data_to_save_export)
 
+            # TODO activates publishing
+            if self.settings['main_settings', 'leco', 'leco_connected']:
+                self._leco_client.publish_signal("dte_signal_temp", dte)
+
         except Exception as e:
             self.logger.exception(str(e))
 
@@ -1127,6 +1131,11 @@ class DAQ_Viewer(ParameterControlModule):
         elif status.command == ThreadStatusViewer.STOP:
             self.stop_grab()
 
+        # TODO activate for publishing
+        if self.settings['main_settings', 'leco', 'leco_connected']:
+            if status.command not in ("ini_detector", "update_settings"):
+                self._leco_client.publish_thread_command(status)
+
     def connect_tcp_ip(self):
         super().connect_tcp_ip(params_state=self.settings.child('detector_settings'),
                                client_type="GRABBER")
@@ -1160,6 +1169,7 @@ class DAQ_Viewer(ParameterControlModule):
             self.snap( send_to_tcpip=True)
 
         elif status.command == LECOViewerCommands.STOP:
+            # TODO change to stop_grab?
             self.stop()
 
         elif status.command == LECOClientCommands.LECO_CONNECTED:

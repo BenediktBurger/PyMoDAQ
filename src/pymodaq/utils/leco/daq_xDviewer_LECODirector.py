@@ -59,10 +59,24 @@ class DAQ_xDViewer_LECODirector(LECODirector, DAQ_Viewer_base):
         """
 
         actor_name = self.settings["actor_name"]
+        self.communicator.unsubscribe_all()
+        try:
+            actor_full_name = (
+                actor_name
+                if "." in actor_name or self.communicator.namespace is None
+                else ".".join((self.communicator.namespace, actor_name))
+            )
+        except TypeError:
+            actor_full_name = actor_name
+            # TODO change to proper logging
+            print("I'm not signed in, namespace for actor is unknown.")
+        else:
+            self.communicator.subscribe(topics=actor_full_name)
         if self.is_master:
             self.controller = DetectorDirector(actor=actor_name,
                                                communicator=self.communicator)
             try:
+                # TODO change to proper logging
                 self.controller.set_remote_name(self.communicator.full_name)  # type: ignore
             except TimeoutError:
                 logger.warning("Timeout setting remote name.")

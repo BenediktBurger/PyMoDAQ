@@ -3,10 +3,12 @@ from pymodaq_utils.enums import StrEnum
 
 import logging
 from threading import Event
-from typing import cast, Optional, Union, List, Sequence, Type
+from typing import Any, cast, Optional, Union, List, Sequence, Type
 
 from pyleco.core import COORDINATOR_PORT
+from pyleco.core.data_message import DataMessage
 from pyleco.json_utils.errors import JSONRPCError, RECEIVER_UNKNOWN, NODE_UNKNOWN
+from pyleco.utils.data_publisher import DataPublisher
 from pyleco.utils.listener import Listener, PipeHandler
 from qtpy.QtCore import QObject, Signal  # type: ignore
 
@@ -16,7 +18,11 @@ from pymodaq_utils.utils import ThreadCommand
 from pymodaq_gui.parameter import ioxml
 from pymodaq_gui.parameter.utils import ParameterWithPath
 
-from pymodaq.utils.leco.utils import binary_serialization_to_kwargs
+from pymodaq.utils.leco.utils import (
+    binary_serialization_to_kwargs,
+    thread_command_to_leco_tuple,
+    binary_serialization,
+)
 from pymodaq.utils.leco.rpc_method_definitions import (
     GenericMethods,
     MoveMethods,
@@ -70,6 +76,7 @@ class ListenerSignals(QObject):
         For an actuator: move_abs, move_home, move_rel, check_position, stop_motion
     """
     # message = Signal(Message)
+    data_message_received = Signal(DataMessage)
 
 
 class PymodaqPipeHandler(PipeHandler):
@@ -89,6 +96,10 @@ class PymodaqPipeHandler(PipeHandler):
             SerializableFactory().register_from_type(
                 cls, cls.serialize, cls.deserialize
             )
+
+    def handle_subscription_message(self, message: DataMessage) -> None:
+        self.signals.data_message_received.emit(message)
+
 
 class ActorHandler(PymodaqPipeHandler):
     def register_data_types_for_deserialization(
@@ -224,6 +235,7 @@ class PymodaqListener(Listener):
         # self.signals.message.connect(self.handle_message)
         self.cmd_signal = self.signals.cmd_signal
         self._handler_class = handler_class
+        self.publisher = DataPublisher("", context=kwargs.get("context"))
 
     def _listen(self, name: str, stop_event: Event, coordinator_host: str, coordinator_port: int,
                 data_host: str, data_port: int) -> None:
@@ -233,6 +245,7 @@ class PymodaqListener(Listener):
                                                    signals=self.signals,
                                                    )
         self.message_handler.register_on_name_change_method(self.indicate_sign_in_out)
+        self.message_handler.register_on_name_change_method(self.publisher.set_full_name)
         self.message_handler.listen(stop_event=stop_event)
 
     def stop_listen(self) -> None:
@@ -248,6 +261,37 @@ class PymodaqListener(Listener):
             self.signals.cmd_signal.emit(ThreadCommand(LECOClientCommands.LECO_CONNECTED))
         else:
             self.signals.cmd_signal.emit(ThreadCommand(LECOClientCommands.LECO_DISCONNECTED))
+
+    # pymodaq messages
+    def create_thread_command_message(self, thread_command: ThreadCommand) -> DataMessage:
+        try:
+            v, b = thread_command_to_leco_tuple(thread_command)
+        except:
+            raise
+        message = DataMessage(topic=self.communicator.full_name, data=v)
+        message.payload.extend(b)
+        return message
+
+    def publish_thread_command(self, thread_command: ThreadCommand) -> None:
+        """Publish a ThreadCommand via the data protocol."""
+        self.publisher.send_message(self.create_thread_command_message(thread_command))
+
+    def create_signal_message(self, signal_name: str, signal_payload: Optional[Any]) -> DataMessage:
+        d: dict[str, Any] = {"type": "Signal", "name": signal_name}
+        additional_payload = None
+        if signal_payload is not None:
+            d["content"], additional_payload = binary_serialization(signal_payload)
+        message = DataMessage(
+            topic=self.communicator.full_name,
+            data=d,
+            additional_payload=additional_payload,
+        )
+        return message
+
+    def publish_signal(self, signal_name: str, signal_payload: Optional[Any]) -> None:
+        self.publisher.send_message(
+            self.create_signal_message(signal_name=signal_name, signal_payload=signal_payload)
+        )
 
 
 class ActorListener(PymodaqListener):

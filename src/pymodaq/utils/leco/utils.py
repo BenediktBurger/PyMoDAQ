@@ -1,12 +1,11 @@
 from __future__ import annotations
 import subprocess
 import sys
-from typing import Any, Optional, Union, get_args, TypeVar
+from typing import Any, cast, Optional, Union, get_args
 
 
-from pymodaq.utils import data
 from pymodaq_utils.serialize.factory import SerializableFactory
-
+from pymodaq_utils.utils import ThreadCommand
 from pymodaq_utils.logger import set_logger
 
 
@@ -40,7 +39,6 @@ def binary_serialization(
     return None, [SerializableFactory().get_apply_serializer(pymodaq_object)]
 
 
-
 def binary_serialization_to_kwargs(
     pymodaq_object: Union[SERIALIZABLE, Any], data_key: str = "data"
 ) -> dict[str, Any]:
@@ -57,8 +55,31 @@ def binary_serialization_to_kwargs(
     return {data_key: d, "additional_payload": b}
 
 
+def thread_command_to_leco_tuple(
+    thread_command: ThreadCommand,
+) -> tuple[dict[str, Any], list[bytes]]:
+    """Convert a thread_command to a dictionary and a list of bytes."""
+    d: dict[str, Any] = {"type": "ThreadCommand"}
+    return d, [SerializableFactory().get_apply_serializer(thread_command)]
+
+
+def leco_tuple_to_thread_command(
+    command_dict: dict[str, Any], additional: list[bytes]
+) -> ThreadCommand:
+    """Convert a leco tuple to a ThreadCommand."""
+    assert command_dict.pop("type") == "ThreadCommand", "The message is not a ThreadCommand!"
+    assert additional, "No data payload present"
+    tc = cast(ThreadCommand, SerializableFactory().get_apply_deserializer(additional[0]))
+    return tc
+
+
 def run_coordinator():
     command = [sys.executable, '-m', 'pyleco.coordinators.coordinator']
+    subprocess.Popen(command)
+
+
+def run_proxy_server() -> None:
+    command = [sys.executable, "-m", "pyleco.coordinators.proxy_server"]
     subprocess.Popen(command)
 
 
@@ -72,3 +93,4 @@ def start_coordinator():
                 logger.info('Coordinator already running')
     except ConnectionRefusedError:
         run_coordinator()
+        run_proxy_server()

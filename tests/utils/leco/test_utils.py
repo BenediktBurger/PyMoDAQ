@@ -1,9 +1,16 @@
+from typing import Any
 
 import pytest
 
 from pymodaq.control_modules.daq_move import DataActuator
 
-from pymodaq.utils.leco.utils import binary_serialization, binary_serialization_to_kwargs
+from pymodaq.utils.leco.utils import (
+    binary_serialization,
+    binary_serialization_to_kwargs,
+    thread_command_to_leco_tuple,
+    leco_tuple_to_thread_command,
+    ThreadCommand,
+)
 
 
 @pytest.mark.parametrize("value", (
@@ -41,3 +48,49 @@ class TestBinarySerialization:
 def test_binary_serialization_to_kwargs_simple():
     data = binary_serialization_to_kwargs(6.7)
     assert data == {"data": 6.7, "additional_payload": None}
+
+
+@pytest.mark.parametrize(
+    "obj, tup",
+    (
+        (7, (7, None)),
+        (
+            1 + 2j,
+            (
+                None,
+                [
+                    b"\x00\x00\x00\x07complex\x00\x00\x00\x04<c16\x00\x00\x00\x10\x00\x00\x00\x00\x00\x00\xf0?\x00\x00\x00\x00\x00\x00\x00@"
+                ],
+            ),
+        ),
+    ),
+)
+def test_binary_serialization(obj: Any, tup: tuple[Any, list[bytes]]):
+    assert binary_serialization(obj) == tup
+
+
+class Test_thread_command_leco_tuple_conversion:
+    test_tuples: list[tuple[ThreadCommand, tuple[dict, list[bytes]]]] = [
+        (
+            ThreadCommand(command="command", attribute=[7]),
+            ({"type": "ThreadCommand", "command": "command", "attribute": [7]}, []),
+        ),
+        (
+            ThreadCommand(command="binary", attribute=[1 + 2j]),
+            (
+                {"type": "ThreadCommand", "command": "binary", "attribute": [None], "binary": [0]},
+                [
+                    b"\x00\x00\x00\x07complex\x00\x00\x00\x04<c16\x00\x00\x00\x10\x00\x00\x00\x00\x00\x00\xf0?\x00\x00\x00\x00\x00\x00\x00@"
+                ],
+            ),
+        ),
+    ]
+
+    @pytest.mark.parametrize("tc, tup", test_tuples)
+    def test_to_tuple(self, tc, tup):
+        assert thread_command_to_leco_tuple(tc) == tup
+
+    @pytest.mark.xfail(True, reason="requires ThreadCommand comparison in pymodaq_utils")
+    @pytest.mark.parametrize("tc, tup", test_tuples)
+    def test_to_tc(self, tc, tup):
+        assert leco_tuple_to_thread_command(*tup) == tc
